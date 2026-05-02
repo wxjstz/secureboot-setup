@@ -1,0 +1,6 @@
+#!/bin/bash
+set -e
+[ -f secureboot/keystore/db/db.auth ]
+[ -f secureboot/keystore/KEK/KEK.auth ]
+[ -f secureboot/keystore/PK/PK.auth ]
+sbkeysync --keystore secureboot/keystore --pk

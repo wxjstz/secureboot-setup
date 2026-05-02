@@ -1,0 +1,4 @@
+#!/bin/bash
+set -e
+[ -f secureboot/cert/MOK.der ]
+mokutil --import secureboot/cert/MOK.der

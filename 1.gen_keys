@@ -1,0 +1,49 @@
+#!/bin/bash
+
+set -e
+
+[ -d secureboot ] && {
+	cd secureboot
+	[ -f sha256sum.txt ] &&
+		sha256sum --status -c sha256sum.txt &&
+			exit 0
+	echo The secureboot directory exists, but some files are missing or some files have been modified.
+	exit 1
+}
+
+mkdir -p secureboot/{cert,config,esl,keystore}
+mkdir -p secureboot/keystore/{PK,KEK,db}
+cd secureboot
+
+# user_name is used to create the certificate common name.
+read -p 'Please input your name (for certificate identification): ' user_name
+user_name=${user_name:-"Unknown_Owner"}
+echo $user_name > config/id.txt
+
+# Generate UUID, It is used to identify the certificate holder.
+uuid=$(uuidgen | tee config/uuid.txt)
+
+# Generate MOK
+openssl req -new -x509 -newkey rsa:2048 -nodes -days 3650 -addext "extendedKeyUsage=codeSigning" -subj "/CN=MOK: $user_name/" -keyout cert/MOK.key -out cert/MOK.crt
+openssl x509 -in cert/MOK.crt -outform DER -out cert/MOK.der
+
+# Generate PK/KEK/db
+openssl req -new -x509 -newkey rsa:2048 -nodes -days 3650 -addext "extendedKeyUsage=codeSigning" -subj "/CN=Secure Boot PK: $user_name/"  -keyout cert/PK.key  -out cert/PK.crt
+openssl req -new -x509 -newkey rsa:2048 -nodes -days 3650 -addext "extendedKeyUsage=codeSigning" -subj "/CN=Secure Boot KEK: $user_name/" -keyout cert/KEK.key -out cert/KEK.crt
+openssl req -new -x509 -newkey rsa:2048 -nodes -days 3650 -addext "extendedKeyUsage=codeSigning" -subj "/CN=Secure Boot DB: $user_name/"  -keyout cert/db.key  -out cert/db.crt
+
+# Generate EFI signature list
+cert-to-efi-sig-list -g  $uuid cert/PK.crt  esl/PK.esl
+cert-to-efi-sig-list -g  $uuid cert/KEK.crt esl/KEK.esl
+cert-to-efi-sig-list -g  $uuid cert/db.crt  esl/db.esl
+
+# Sign EFI signature list
+sign-efi-sig-list -g  $uuid -k cert/KEK.key -c cert/KEK.crt db esl/db.esl  keystore/db/db.auth
+sign-efi-sig-list -g  $uuid -k cert/PK.key  -c cert/PK.crt KEK esl/KEK.esl keystore/KEK/KEK.auth
+sign-efi-sig-list -g  $uuid -k cert/PK.key  -c cert/PK.crt  PK esl/PK.esl  keystore/PK/PK.auth
+
+sha256sum $(find -type f) > sha256sum.txt
+
+cd ..
+chmod -R go-rwx secureboot
+
